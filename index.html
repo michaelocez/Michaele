@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Michaele</title>
+	<meta name="description" content="A Wordle-style game where the secret word is always MICHAEL.">
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<main class="app-shell">
+		<h1 class="title">Michaele</h1>
+		<p class="status" id="status" aria-live="polite">Type your guess to fill the tiles.</p>
+		<div class="win-toast" id="win-toast" hidden aria-live="polite"></div>
+
+		<section class="board" id="board" tabindex="0" aria-label="Guess board"></section>
+		<section class="keyboard" id="keyboard" aria-label="On-screen keyboard"></section>
+		<div class="end-game-modal" id="end-game-modal" hidden>
+			<div class="end-game-card" role="dialog" aria-modal="true" aria-labelledby="end-game-title" aria-describedby="end-game-message">
+				<h2 id="end-game-title">Game over</h2>
+				<p id="end-game-message">Start a new game to play again.</p>
+				<button class="secondary-button" type="button" id="restart-button">New game</button>
+			</div>
+		</div>
+	</main>
+
+	<script src="script.js"></script>
+</body>
+</html>

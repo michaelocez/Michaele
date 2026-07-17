@@ -1,14 +1,17 @@
 const secretWord = 'MICHAEL';
 const totalRows = 6;
 const wordLength = secretWord.length;
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const revealStepDelay = prefersReducedMotion ? 20 : 220;
+const tileFlipDuration = prefersReducedMotion ? 20 : 500;
+const revealSettleDelay = 80;
 
 const boardElement = document.getElementById('board');
 const keyboardElement = document.getElementById('keyboard');
-const statusElement = document.getElementById('status');
+const announcerElement = document.getElementById('announcer');
 const winToast = document.getElementById('win-toast');
 const endGameModal = document.getElementById('end-game-modal');
 const endGameTitle = document.getElementById('end-game-title');
-const endGameMessage = document.getElementById('end-game-message');
 const restartButton = document.getElementById('restart-button');
 const boardRows = [];
 const keyboardKeys = new Map();
@@ -48,6 +51,8 @@ function createTile() {
 function createRow() {
 	const row = document.createElement('div');
 	row.className = 'row';
+	row.setAttribute('role', 'group');
+	row.setAttribute('aria-label', `Guess ${boardRows.length + 1}, empty`);
 	const tiles = [];
 
 	for (let column = 0; column < wordLength; column += 1) {
@@ -66,13 +71,14 @@ function createKey(label) {
 	button.className = 'key';
 	button.textContent = label === 'BACKSPACE' ? '⌫' : label;
 	button.dataset.key = label;
+	button.setAttribute('aria-label', label === 'BACKSPACE' ? 'Backspace' : label);
 
 	if (label === 'ENTER' || label === 'BACKSPACE') {
 		button.classList.add('key--wide');
 	}
 
 	button.addEventListener('click', () => {
-		handleVirtualKey(label);
+		handleGuessInput(label);
 	});
 
 	keyboardKeys.set(label, button);
@@ -206,14 +212,16 @@ function setGameControlsDisabled(disabled) {
 	});
 }
 
-function showEndGameModal(message) {
+function showEndGameModal(message, hideTitle = false) {
 	endGameTitle.textContent = message;
-	endGameMessage.textContent = 'Start a new game to play again.';
+	endGameTitle.classList.toggle('visually-hidden', hideTitle);
 	endGameModal.hidden = false;
+	restartButton.focus();
 }
 
 function hideEndGameModal() {
 	endGameModal.hidden = true;
+	endGameTitle.classList.remove('visually-hidden');
 }
 
 function hideWinToast() {
@@ -226,13 +234,29 @@ function showWinToast(message) {
 	winToast.hidden = false;
 }
 
+function showTemporaryToast(message, duration = 1600) {
+	if (endGameToastTimer !== null) {
+		window.clearTimeout(endGameToastTimer);
+	}
+
+	showWinToast(message);
+	endGameToastTimer = window.setTimeout(() => {
+		endGameToastTimer = null;
+		hideWinToast();
+	}, duration);
+}
+
 function getWinMessage(guessCount) {
 	return winMessages[guessCount] ?? 'Great';
 }
 
 function finishWin(guessCount) {
 	const toastMessage = getWinMessage(guessCount);
-	const modalMessage = `You got Michaele in ${guessCount}!`;
+	const modalMessage = `You got Michael in ${guessCount}!`;
+
+	if (endGameToastTimer !== null) {
+		window.clearTimeout(endGameToastTimer);
+	}
 
 	showWinToast(toastMessage);
 	endGameToastTimer = window.setTimeout(() => {
@@ -240,20 +264,21 @@ function finishWin(guessCount) {
 		hideWinToast();
 		showEndGameModal(modalMessage);
 	}, 2000);
-	setStatus(modalMessage);
-	restartButton.focus();
 }
 
-function finishGame(message) {
+function finishGame() {
 	gameOver = true;
 	isRevealing = false;
 	clearRevealTimers();
 	setGameControlsDisabled(true);
-	setStatus(message);
 	currentGuess = '';
 	renderCurrentGuess();
-	showEndGameModal(message);
-	restartButton.focus();
+	showWinToast('Michael');
+	endGameModalTimer = window.setTimeout(() => {
+		endGameModalTimer = null;
+		hideWinToast();
+		showEndGameModal('Game over', true);
+	}, 1000);
 }
 
 function revealGuess(guess) {
@@ -261,19 +286,37 @@ function revealGuess(guess) {
 	const statuses = scoreGuess(guess);
 
 	for (let index = 0; index < wordLength; index += 1) {
-		const timerId = window.setTimeout(() => {
+		const flipTimerId = window.setTimeout(() => {
 			tiles[index].textContent = guess[index];
-			tiles[index].classList.add(`tile--${statuses[index]}`);
-			tiles[index].classList.add('tile--reveal');
-			updateKeyboardState(guess[index], statuses[index]);
-			window.setTimeout(() => {
-				tiles[index].classList.remove('tile--reveal');
-			}, 180);
-		}, index * 120);
-		revealTimers.push(timerId);
+			tiles[index].classList.add('tile--flip');
+
+			const colourTimerId = window.setTimeout(() => {
+				tiles[index].classList.add(`tile--${statuses[index]}`);
+				updateKeyboardState(guess[index], statuses[index]);
+			}, tileFlipDuration / 2);
+
+			const finishTimerId = window.setTimeout(() => {
+				tiles[index].classList.remove('tile--flip');
+			}, tileFlipDuration);
+
+			revealTimers.push(colourTimerId, finishTimerId);
+		}, index * revealStepDelay);
+		revealTimers.push(flipTimerId);
 	}
 
 	return statuses;
+}
+
+function getRevealDuration() {
+	return ((wordLength - 1) * revealStepDelay) + tileFlipDuration + revealSettleDelay;
+}
+
+function announceGuessResult(guess, statuses) {
+	const result = statuses
+		.map((status, index) => `${guess[index]} ${status}`)
+		.join(', ');
+	announcerElement.textContent = `Guess ${currentAttempt + 1}: ${result}.`;
+	boardRows[currentAttempt]?.[0]?.parentElement?.setAttribute('aria-label', `Guess ${currentAttempt + 1}: ${result}`);
 }
 
 
@@ -301,22 +344,25 @@ function handleGuessInput(label) {
 	renderCurrentGuess();
 }
 
-function setStatus(message) {
-	statusElement.classList.remove('status--error');
-	statusElement.textContent = message;
+function shakeCurrentRow() {
+	const rowElement = boardRows[currentAttempt]?.[0]?.parentElement;
+
+	if (!rowElement) {
+		return;
+	}
+
+	rowElement.classList.remove('row--shaking');
+	void rowElement.offsetWidth;
+	rowElement.classList.add('row--shaking');
+
+	window.setTimeout(() => {
+		rowElement.classList.remove('row--shaking');
+	}, 320);
 }
 
 function showError(message) {
-	statusElement.textContent = message;
-	statusElement.classList.add('status--error');
-	boardElement.classList.remove('board--shaking');
-	void boardElement.offsetWidth;
-	boardElement.classList.add('board--shaking');
-
-	window.setTimeout(() => {
-		boardElement.classList.remove('board--shaking');
-		statusElement.classList.remove('status--error');
-	}, 320);
+	showTemporaryToast(message);
+	shakeCurrentRow();
 }
 
 function resetGame() {
@@ -331,7 +377,7 @@ function resetGame() {
 	isRevealing = false;
 	setGameControlsDisabled(false);
 	renderCurrentGuess();
-	setStatus('Type your guess to fill the tiles.');
+	announcerElement.textContent = '';
 	boardElement.focus();
 }
 
@@ -341,15 +387,20 @@ function submitCurrentGuess() {
 	}
 
 	if (currentGuess.length !== wordLength) {
-		showError('Guess must be exactly 7 letters long.');
+		showError('Not enough letters');
+		return;
+	}
+
+	if (!allowedWords.has(currentGuess)) {
+		showError('Not in word list');
 		return;
 	}
 
 	const guess = currentGuess;
 	isRevealing = true;
 	setGameControlsDisabled(true);
-	setStatus('Checking guess...');
-	revealGuess(guess);
+	const statuses = revealGuess(guess);
+	announceGuessResult(guess, statuses);
 	revealCompletionTimer = window.setTimeout(() => {
 		revealCompletionTimer = null;
 		currentAttempt += 1;
@@ -365,7 +416,7 @@ function submitCurrentGuess() {
 		}
 
 		if (currentAttempt >= totalRows) {
-			finishGame('No guesses left. The answer was MICHAEL.');
+			finishGame();
 			return;
 		}
 
@@ -373,9 +424,8 @@ function submitCurrentGuess() {
 		currentGuess = '';
 		renderCurrentGuess();
 		setGameControlsDisabled(false);
-		setStatus(`${totalRows - currentAttempt} guesses left.`);
 		boardElement.focus();
-	}, wordLength * 120 + 140);
+	}, getRevealDuration());
 }
 
 function handleDocumentKeydown(event) {
